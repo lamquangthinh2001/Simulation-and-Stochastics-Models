@@ -1,0 +1,555 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "1599c5a3",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:58:41.823119Z",
+     "iopub.status.busy": "2023-04-30T12:58:41.822567Z",
+     "iopub.status.idle": "2023-04-30T12:58:53.801980Z",
+     "shell.execute_reply": "2023-04-30T12:58:53.800781Z"
+    },
+    "papermill": {
+     "duration": 11.98887,
+     "end_time": "2023-04-30T12:58:53.804733",
+     "exception": false,
+     "start_time": "2023-04-30T12:58:41.815863",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Collecting SimPyClassic\r\n",
+      "  Downloading SimPyClassic-2.3.4-py2.py3-none-any.whl (79 kB)\r\n",
+      "\u001b[2K     \u001b[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[32m79.2/79.2 kB\u001b[0m \u001b[31m3.2 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\r\n",
+      "\u001b[?25hInstalling collected packages: SimPyClassic\r\n",
+      "Successfully installed SimPyClassic-2.3.4\r\n",
+      "\u001b[33mWARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv\u001b[0m\u001b[33m\r\n",
+      "\u001b[0m"
+     ]
+    }
+   ],
+   "source": [
+    "!pip install SimPyClassic"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "71c58e62",
+   "metadata": {
+    "_cell_guid": "b1076dfc-b9ad-4769-8c92-a6c4dae69d19",
+    "_uuid": "8f2839f25d086af736a60e9eeb907d3b93b6e0e5",
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:58:53.814776Z",
+     "iopub.status.busy": "2023-04-30T12:58:53.814172Z",
+     "iopub.status.idle": "2023-04-30T12:59:24.658236Z",
+     "shell.execute_reply": "2023-04-30T12:59:24.657055Z"
+    },
+    "papermill": {
+     "duration": 30.854368,
+     "end_time": "2023-04-30T12:59:24.663366",
+     "exception": false,
+     "start_time": "2023-04-30T12:58:53.808998",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Estimate of W: 1.0005595550991209\n",
+      "Conf int of W: (0.9890778062565351, 1.0120413039417067)\n",
+      "Estimate of WQ: 1.2539106228199983\n",
+      "Conf int of WQ: (1.2361811712200241, 1.2716400744199725)\n",
+      "Estimate of LQ: 2.5078212456399966\n",
+      "Conf int of LQ: (2.4723623424400483, 2.543280148839945)\n"
+     ]
+    }
+   ],
+   "source": [
+    "from SimPy.Simulation import *\n",
+    "import random\n",
+    "import numpy as np\n",
+    "import math\n",
+    "\n",
+    "\n",
+    "\n",
+    "## Useful extras ----------\n",
+    "def conf(L):\n",
+    "    \"\"\"confidence interval\"\"\"\n",
+    "    lower = np.mean(L) - 1.96*np.std(L)/math.sqrt(len(L))\n",
+    "    upper = np.mean(L) + 1.96*np.std(L)/math.sqrt(len(L))\n",
+    "    return (lower,upper)\n",
+    "\n",
+    "## Model ----------\n",
+    "class Source(Process):\n",
+    "    \"\"\"generate random arrivals\"\"\"\n",
+    "    def run(self, N, lamb, mu):\n",
+    "        for i in range(N):\n",
+    "            a = Arrival(str(i))\n",
+    "            activate(a, a.run(mu))\n",
+    "            t = random.expovariate(lamb)\n",
+    "            yield hold, self, t         \n",
+    "            \n",
+    "class Arrival(Process):\n",
+    "    \"\"\"an arrival\"\"\"\n",
+    "    def run(self, mu):\n",
+    "        arrivetime = now()\n",
+    "        yield request, self, G.server\n",
+    "        t = random.expovariate(mu)\n",
+    "        yield hold, self, t\n",
+    "        yield release, self, G.server\n",
+    "        delay = now()-arrivetime\n",
+    "        G.delaymon.observe(delay)\n",
+    "        #monitor proportion of time there are k customers in the system\n",
+    "        for k in range(G.K):\n",
+    "            if G.server.n == k:\n",
+    "                G.m[k].observe(1)\n",
+    "            else:\n",
+    "                G.m[k].observe(0)\n",
+    "        \n",
+    "\n",
+    "class G:\n",
+    "    server = 'dummy'\n",
+    "    delaymon = 'Monitor'\n",
+    "    #list of monitors\n",
+    "    m = []\n",
+    "    K = 0\n",
+    "\n",
+    "def model(c, N, lamb, mu, maxtime, rvseed, K):\n",
+    "    # setup\n",
+    "    initialize()\n",
+    "    random.seed(rvseed)\n",
+    "    G.server = Resource(c, monitored = True)\n",
+    "    G.delaymon = Monitor()\n",
+    "    G.K = K\n",
+    "    # K monitors\n",
+    "    G.m = [Monitor() for i in range(K)]\n",
+    "    \n",
+    "    # simulate\n",
+    "    s = Source('Source')\n",
+    "    activate(s, s.run(N, lamb, mu))\n",
+    "    simulate(until=maxtime)\n",
+    "   \n",
+    "    # gather performance measures\n",
+    "    W = G.delaymon.mean()\n",
+    "    LQ = G.server.waitMon.mean()\n",
+    "    rho = lamb/mu\n",
+    "    pi0 = 1 - rho\n",
+    "    pi = [(rho**k)*(1-rho) for k in range(1,K)]\n",
+    "    WQ = LQ/ lamb\n",
+    "    return (W, WQ,LQ, pi0, pi)\n",
+    "\n",
+    "## Experiment ----------\n",
+    "K = 10\n",
+    "c = 1\n",
+    "lamb = 2\n",
+    "mu = 3\n",
+    "N = 10000\n",
+    "maxtime = 2000000\n",
+    "allW = []\n",
+    "allWQ = []\n",
+    "allLQ = []\n",
+    "allPi0 = []\n",
+    "allPi = [[] for k in range(K-1)]\n",
+    "for k in range(50):\n",
+    "    seed = 123*k\n",
+    "    result = model(c, N, lamb, mu, maxtime, seed, K)\n",
+    "    allW.append(result[0])\n",
+    "    allWQ.append(result[1])\n",
+    "    allLQ.append(result[2])\n",
+    "    allPi0.append(result[3])\n",
+    "    for i in range(K-1):\n",
+    "        allPi[i].append(result[4][i])\n",
+    "        \n",
+    "#calculate confidence intervals\n",
+    "ciW = conf(allW)\n",
+    "ciWQ = conf(allWQ)\n",
+    "ciLQ = conf(allLQ)\n",
+    "ciPi0 = conf(allPi0)\n",
+    "ciPi = [conf(allPi[i]) for i in range(K-1)]\n",
+    "\n",
+    "#Results\n",
+    "print(\"Estimate of W:\", np.mean(allW))\n",
+    "print(\"Conf int of W:\", ciW)\n",
+    "print(\"Estimate of WQ:\", np.mean(allWQ))\n",
+    "print(\"Conf int of WQ:\", ciWQ)\n",
+    "print(\"Estimate of LQ:\", np.mean(allLQ))\n",
+    "print(\"Conf int of LQ:\", ciLQ)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "2f9b2b75",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003483,
+     "end_time": "2023-04-30T12:59:24.670658",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.667175",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "The simulation results are close to the expected values, with the 95% CI containing the expected values for all performance measures. Therefore, the modified simulation model is accurate and effective in simulating M/M/c queueing system with monitors"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "3d180297",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003478,
+     "end_time": "2023-04-30T12:59:24.677801",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.674323",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "Problem 2"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "17a237ab",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003524,
+     "end_time": "2023-04-30T12:59:24.684985",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.681461",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "a"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "662489ea",
+   "metadata": {
+    "papermill": {
+     "duration": 0.00347,
+     "end_time": "2023-04-30T12:59:24.692095",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.688625",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "i"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "e66bc0d0",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:59:24.701358Z",
+     "iopub.status.busy": "2023-04-30T12:59:24.700946Z",
+     "iopub.status.idle": "2023-04-30T12:59:24.707408Z",
+     "shell.execute_reply": "2023-04-30T12:59:24.706278Z"
+    },
+    "papermill": {
+     "duration": 0.013884,
+     "end_time": "2023-04-30T12:59:24.709611",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.695727",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import random\n",
+    "import math\n",
+    "\n",
+    "# Define parameters\n",
+    "mu1 = 2\n",
+    "mu2 = 3\n",
+    "p = 0.8\n",
+    "\n",
+    "def coxian():\n",
+    "    \"\"\"\n",
+    "    Generates a random variate from the Coxian distribution\n",
+    "    \"\"\"\n",
+    "    u1 = random.uniform(0, 1)\n",
+    "    u2 = random.uniform(0, 1)\n",
+    "    \n",
+    "    if u1 <= p:\n",
+    "        x = math.ceil(u2 * mu1)\n",
+    "    else:\n",
+    "        x = math.ceil(u2 * mu2) + mu1\n",
+    "    return x"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "4f4646d2",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003585,
+     "end_time": "2023-04-30T12:59:24.716950",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.713365",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "ii"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "3ee638ad",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:59:24.726151Z",
+     "iopub.status.busy": "2023-04-30T12:59:24.725440Z",
+     "iopub.status.idle": "2023-04-30T12:59:24.747077Z",
+     "shell.execute_reply": "2023-04-30T12:59:24.745881Z"
+    },
+    "papermill": {
+     "duration": 0.02852,
+     "end_time": "2023-04-30T12:59:24.749164",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.720644",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "E[tau] = 0.5649, 95% CI: (0.5542, 0.5756)\n",
+      "E[tau^2] = 0.6171, 95% CI: (0.5917, 0.6425)\n"
+     ]
+    }
+   ],
+   "source": [
+    "import random\n",
+    "\n",
+    "mu1 = 2\n",
+    "mu2 = 3\n",
+    "p = 0.8\n",
+    "\n",
+    "def coxian():\n",
+    "    u1 = random.random()\n",
+    "    u2 = random.expovariate(mu1) if u1 <= p else random.expovariate(mu2) + random.expovariate(mu1)\n",
+    "    x = u2\n",
+    "    return x\n",
+    "\n",
+    "\n",
+    "\n",
+    "# Simulate 10000 random variates\n",
+    "n = 10000\n",
+    "samples = np.array([coxian() for i in range(n)])\n",
+    "\n",
+    "# Estimate expected value of tau and tau^2\n",
+    "E_tau = np.mean(samples)\n",
+    "E_tau2 = np.mean(samples ** 2)\n",
+    "\n",
+    "# Calculate 95% confidence intervals\n",
+    "alpha = 0.05\n",
+    "z = 1.96 # 95% confidence interval z-value\n",
+    "se_tau = np.std(samples) / np.sqrt(n)\n",
+    "se_tau2 = np.std(samples ** 2) / np.sqrt(n)\n",
+    "\n",
+    "CI_tau = (E_tau - z*se_tau, E_tau + z*se_tau)\n",
+    "CI_tau2 = (E_tau2 - z*se_tau2, E_tau2 + z*se_tau2)\n",
+    "\n",
+    "# Print results\n",
+    "print(f\"E[tau] = {E_tau:.4f}, 95% CI: ({CI_tau[0]:.4f}, {CI_tau[1]:.4f})\")\n",
+    "print(f\"E[tau^2] = {E_tau2:.4f}, 95% CI: ({CI_tau2[0]:.4f}, {CI_tau2[1]:.4f})\")\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "22030215",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003617,
+     "end_time": "2023-04-30T12:59:24.756813",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.753196",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "b"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "30eb4332",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:59:24.766407Z",
+     "iopub.status.busy": "2023-04-30T12:59:24.765477Z",
+     "iopub.status.idle": "2023-04-30T12:59:24.774761Z",
+     "shell.execute_reply": "2023-04-30T12:59:24.773971Z"
+    },
+    "papermill": {
+     "duration": 0.016359,
+     "end_time": "2023-04-30T12:59:24.776905",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.760546",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "import random\n",
+    "\n",
+    "\n",
+    "def mg1_queue(n, rho):\n",
+    "    \"\"\"\n",
+    "    Simulates an M/G/1 queueing system with n customers and utilization rho.\n",
+    "    Returns the average waiting time in the queue and the average time in the system.\n",
+    "    \"\"\"\n",
+    "    # Initialize variables\n",
+    "    t = 0  # Current time\n",
+    "    queue = []  # Customers waiting in queue\n",
+    "    busy = False  # Whether server is busy\n",
+    "    arrival_times = np.random.exponential(1/rho, n)  # Customer arrival times\n",
+    "    service_times = np.array([coxian() for i in range(n)])  # Service times\n",
+    "    \n",
+    "    # Simulate the queueing system\n",
+    "    wait_times = []\n",
+    "    for i in range(n):\n",
+    "        # Check if a customer arrives\n",
+    "        if arrival_times[i] <= t:\n",
+    "            queue.append(service_times[i])\n",
+    "        else:\n",
+    "            # Check if the server is idle\n",
+    "            if not busy and len(queue) > 0:\n",
+    "                busy = True\n",
+    "                busy_time = queue.pop(0)\n",
+    "                wait_time = t - arrival_times[i]\n",
+    "                wait_times.append(wait_time)\n",
+    "                t += busy_time\n",
+    "                busy = False\n",
+    "            else:\n",
+    "                t = arrival_times[i]\n",
+    "    \n",
+    "    # Calculate performance measures\n",
+    "    wq = np.mean([max(wt, 0) for wt in wait_times])\n",
+    "    w = np.mean(service_times) + wq\n",
+    "    E_tau2 = np.mean(service_times ** 2)\n",
+    "    Y = (wq - E_tau2) / (2*(1-rho))\n",
+    "    \n",
+    "    return wq, w, Y"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "230599ad",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2023-04-30T12:59:24.785869Z",
+     "iopub.status.busy": "2023-04-30T12:59:24.785521Z",
+     "iopub.status.idle": "2023-04-30T12:59:24.862182Z",
+     "shell.execute_reply": "2023-04-30T12:59:24.860967Z"
+    },
+    "papermill": {
+     "duration": 0.083866,
+     "end_time": "2023-04-30T12:59:24.864572",
+     "exception": false,
+     "start_time": "2023-04-30T12:59:24.780706",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Y_mean = -3.060\n",
+      "Y_std = 0.198\n",
+      "Y_95CI = (-3.1149541243425327, -3.0054383148263133)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Set simulation parameters\n",
+    "n = 1000\n",
+    "rho = 0.9\n",
+    "replications = 50\n",
+    "\n",
+    "# Simulate the queueing system for replications\n",
+    "Y_values = []\n",
+    "for i in range(replications):\n",
+    "    _, _, Y = mg1_queue(n, rho)\n",
+    "    Y_values.append(Y)\n",
+    "\n",
+    "# Calculate the mean, standard deviation, and 95% confidence interval of Y\n",
+    "Y_mean = np.mean(Y_values)\n",
+    "Y_std = np.std(Y_values, ddof=1)\n",
+    "Y_95CI = (Y_mean - 1.96*Y_std/np.sqrt(replications), Y_mean + 1.96*Y_std/np.sqrt(replications))\n",
+    "\n",
+    "# Print the results\n",
+    "print(f\"Y_mean = {Y_mean:.3f}\")\n",
+    "print(f\"Y_std = {Y_std:.3f}\")\n",
+    "print(f\"Y_95CI = {Y_95CI}\")\n"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.12"
+  },
+  "papermill": {
+   "default_parameters": {},
+   "duration": 53.03698,
+   "end_time": "2023-04-30T12:59:25.590362",
+   "environment_variables": {},
+   "exception": null,
+   "input_path": "__notebook__.ipynb",
+   "output_path": "__notebook__.ipynb",
+   "parameters": {},
+   "start_time": "2023-04-30T12:58:32.553382",
+   "version": "2.4.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
